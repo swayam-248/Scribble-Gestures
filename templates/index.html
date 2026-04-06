@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Scribble AI — Hand Gesture Game</title>
+<link href="https://fonts.googleapis.com/css2?family=Boogaloo&family=Nunito:wght@400;600;700&display=swap" rel="stylesheet"/>
+<style>
+  :root {
+    --ink:    #1a1a2e;
+    --paper:  #fdfaf3;
+    --chalk:  #ffffff;
+    --blue:   #2563eb;
+    --yellow: #fbbf24;
+    --green:  #10b981;
+    --red:    #ef4444;
+    --purple: #7c3aed;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--ink);
+    font-family: 'Nunito', sans-serif;
+    color: var(--chalk);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+
+  /* Animated background grid */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px);
+    background-size: 40px 40px;
+    animation: gridScroll 20s linear infinite;
+  }
+  @keyframes gridScroll {
+    from { transform: translate(0, 0); }
+    to   { transform: translate(40px, 40px); }
+  }
+
+  .hero {
+    position: relative;
+    z-index: 1;
+    text-align: center;
+    animation: fadeUp 0.8s ease both;
+  }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(30px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .logo {
+    font-family: 'Boogaloo', cursive;
+    font-size: clamp(3.5rem, 10vw, 7rem);
+    letter-spacing: -2px;
+    line-height: 1;
+    background: linear-gradient(135deg, var(--yellow), var(--green), var(--blue));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    filter: drop-shadow(0 4px 24px rgba(251,191,36,0.3));
+  }
+
+  .tagline {
+    font-size: 1.1rem;
+    color: rgba(255,255,255,0.55);
+    margin: 0.5rem 0 2.5rem;
+    letter-spacing: 0.05em;
+  }
+
+  .cards {
+    display: flex;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+    justify-content: center;
+    animation: fadeUp 0.8s 0.2s ease both;
+  }
+
+  .card {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 20px;
+    padding: 2.5rem 2rem;
+    width: 260px;
+    cursor: pointer;
+    transition: transform 0.2s, background 0.2s, border-color 0.2s;
+    text-decoration: none;
+    color: inherit;
+    display: block;
+    backdrop-filter: blur(10px);
+  }
+
+  .card:hover {
+    transform: translateY(-6px);
+    background: rgba(255,255,255,0.11);
+    border-color: rgba(255,255,255,0.28);
+  }
+
+  .card .icon { font-size: 3.5rem; margin-bottom: 1rem; display: block; }
+  .card h2 { font-family: 'Boogaloo', cursive; font-size: 1.8rem; margin-bottom: 0.5rem; }
+  .card p  { font-size: 0.9rem; color: rgba(255,255,255,0.55); line-height: 1.5; }
+
+  .card.drawer  { border-color: rgba(37,99,235,0.5); }
+  .card.guesser { border-color: rgba(16,185,129,0.5); }
+  .card.drawer:hover  { border-color: var(--blue);  box-shadow: 0 0 30px rgba(37,99,235,0.2); }
+  .card.guesser:hover { border-color: var(--green); box-shadow: 0 0 30px rgba(16,185,129,0.2); }
+
+  .badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 3px 10px;
+    border-radius: 99px;
+    margin-bottom: 0.8rem;
+  }
+  .badge.cam  { background: rgba(37,99,235,0.25);  color: #93c5fd; }
+  .badge.web  { background: rgba(16,185,129,0.25); color: #6ee7b7; }
+
+  .info-bar {
+    margin-top: 2.5rem;
+    display: flex;
+    gap: 2rem;
+    justify-content: center;
+    animation: fadeUp 0.8s 0.4s ease both;
+  }
+
+  .info-chip {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.8rem;
+    color: rgba(255,255,255,0.4);
+  }
+  .info-chip span { font-size: 1rem; }
+
+  .status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 6px var(--green);
+    animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.4; }
+  }
+
+  .floating {
+    position: fixed;
+    font-size: 2rem;
+    animation: floatAround linear infinite;
+    opacity: 0.15;
+    pointer-events: none;
+    user-select: none;
+  }
+  @keyframes floatAround {
+    0%   { transform: translate(0, 0) rotate(0deg); }
+    25%  { transform: translate(30px, -40px) rotate(90deg); }
+    50%  { transform: translate(-20px, -70px) rotate(180deg); }
+    75%  { transform: translate(-50px, -30px) rotate(270deg); }
+    100% { transform: translate(0, 0) rotate(360deg); }
+  }
+</style>
+</head>
+<body>
+
+<!-- Floating decorative icons -->
+<div class="floating" style="top:10%;left:8%;animation-duration:18s;">✏️</div>
+<div class="floating" style="top:70%;left:5%;animation-duration:24s;font-size:1.4rem;">🎨</div>
+<div class="floating" style="top:20%;right:7%;animation-duration:20s;">💡</div>
+<div class="floating" style="top:75%;right:10%;animation-duration:16s;font-size:1.4rem;">✋</div>
+<div class="floating" style="top:50%;left:50%;animation-duration:22s;font-size:1.2rem;">⭐</div>
+
+<div class="hero">
+  <div class="logo">Scribble AI</div>
+  <p class="tagline">Draw with your hands · Guess in real time · Play together</p>
+
+  <div class="cards">
+    <a href="/drawer" class="card drawer">
+      <span class="badge cam">📷 Webcam Required</span>
+      <span class="icon">✋</span>
+      <h2>Drawer</h2>
+      <p>Use hand gestures to draw on the virtual canvas. Your partner guesses the word.</p>
+    </a>
+
+    <a href="/guesser" class="card guesser">
+      <span class="badge web">🌐 Browser Only</span>
+      <span class="icon">💬</span>
+      <h2>Guesser</h2>
+      <p>Watch the drawing appear in real time and type your guesses to score points.</p>
+    </a>
+  </div>
+
+  <div class="info-bar">
+    <div class="info-chip"><div class="status-dot"></div> Real-time via WebSocket</div>
+    <div class="info-chip"><span>🤖</span> MediaPipe + KNN</div>
+    <div class="info-chip"><span>🎮</span> 2 Players</div>
+  </div>
+</div>
+
+</body>
+</html>

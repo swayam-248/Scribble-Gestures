@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Scribble AI — Drawer</title>
+<link href="https://fonts.googleapis.com/css2?family=Boogaloo&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet"/>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<style>
+  :root {
+    --ink:    #1a1a2e;
+    --paper:  #fdfaf3;
+    --blue:   #2563eb;
+    --green:  #10b981;
+    --red:    #ef4444;
+    --yellow: #fbbf24;
+    --chalk:  #ffffff;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--ink);
+    font-family: 'Nunito', sans-serif;
+    color: var(--chalk);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+  }
+
+  .topbar {
+    position: relative; z-index: 10;
+    width: 100%; max-width: 900px;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 1rem 1.5rem;
+  }
+  .logo { font-family: 'Boogaloo', cursive; font-size: 1.6rem; color: var(--yellow); }
+  .role-badge {
+    background: rgba(37,99,235,0.2);
+    border: 1px solid rgba(37,99,235,0.5);
+    color: #93c5fd;
+    font-size: 0.75rem; font-weight: 700;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    padding: 4px 12px; border-radius: 99px;
+  }
+  .score-display {
+    font-family: 'Boogaloo', cursive;
+    font-size: 1.4rem;
+    display: flex; align-items: center; gap: 0.5rem;
+  }
+  .score-num { color: var(--yellow); }
+
+  /* ── WORD CARD ── */
+  .word-card {
+    position: relative; z-index: 10;
+    width: 100%; max-width: 860px;
+    margin: 0 1.5rem 0.8rem;
+    background: rgba(37,99,235,0.12);
+    border: 2px solid rgba(37,99,235,0.4);
+    border-radius: 16px;
+    padding: 1rem 1.5rem;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 1rem;
+  }
+  .word-label { font-size: 0.85rem; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 0.1em; }
+  .word-value {
+    font-family: 'Boogaloo', cursive;
+    font-size: 2.2rem;
+    color: var(--yellow);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    filter: drop-shadow(0 0 10px rgba(251,191,36,0.4));
+  }
+  .word-value.hidden-word { filter: blur(8px); user-select: none; }
+
+  /* ── STATUS BAR ── */
+  .status-bar {
+    position: relative; z-index: 10;
+    width: 100%; max-width: 860px;
+    display: flex; gap: 1rem; align-items: center;
+    padding: 0 1.5rem 0.5rem;
+  }
+  .timer-wrap {
+    flex: 1; background: rgba(255,255,255,0.06);
+    border-radius: 8px; overflow: hidden; height: 8px;
+  }
+  .timer-bar {
+    height: 100%;
+    background: linear-gradient(90deg, var(--blue), var(--yellow));
+    transition: width 1s linear, background 1s;
+    border-radius: 8px;
+  }
+  .timer-bar.danger { background: linear-gradient(90deg, var(--red), var(--yellow)); }
+  .timer-text { font-family:'Boogaloo',cursive; font-size:1.1rem; min-width:3rem; text-align:right; }
+
+  /* ── CANVAS ── */
+  .canvas-wrap {
+    position: relative;
+    width: 100%; max-width: 860px;
+    margin: 0 1.5rem 1rem;
+    border-radius: 16px; overflow: hidden;
+    border: 2px solid rgba(255,255,255,0.1);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  }
+  #previewCanvas {
+    display: block; width: 100%;
+    background: var(--paper);
+  }
+
+  .canvas-overlay {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    background: rgba(26,26,46,0.88);
+    backdrop-filter: blur(4px);
+    font-family: 'Boogaloo', cursive;
+    font-size: 2rem;
+    text-align: center; padding: 1rem;
+    transition: opacity 0.4s;
+  }
+  .canvas-overlay.hidden { opacity: 0; pointer-events: none; }
+  .overlay-emoji { font-size: 4rem; margin-bottom: 0.5rem; }
+  .overlay-sub { font-size: 1rem; font-family:'Nunito',sans-serif; opacity:0.6; margin-top:0.5rem; }
+
+  /* ── INFO PANEL ── */
+  .info-panel {
+    position: relative; z-index: 10;
+    width: 100%; max-width: 860px;
+    padding: 0 1.5rem 1.5rem;
+    display: flex; flex-direction: column; gap: 0.8rem;
+  }
+
+  .gesture-guide {
+    display: flex; gap: 0.8rem; flex-wrap: wrap;
+  }
+  .gesture-chip {
+    display: flex; align-items: center; gap: 0.5rem;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 10px; padding: 0.6rem 1rem;
+    font-size: 0.85rem;
+  }
+  .gesture-chip .g-icon { font-size: 1.4rem; }
+  .gesture-chip .g-label { color: rgba(255,255,255,0.5); font-size: 0.75rem; }
+  .gesture-chip .g-name { font-weight: 700; }
+
+  .launch-box {
+    background: rgba(37,99,235,0.1);
+    border: 1px solid rgba(37,99,235,0.3);
+    border-radius: 12px;
+    padding: 1rem 1.2rem;
+    font-size: 0.85rem;
+    color: rgba(255,255,255,0.6);
+    line-height: 1.7;
+  }
+  .launch-box code {
+    background: rgba(255,255,255,0.08);
+    border-radius: 6px;
+    padding: 2px 8px;
+    font-family: 'Courier New', monospace;
+    color: var(--yellow);
+    font-size: 0.85rem;
+  }
+  .launch-box strong { color: var(--chalk); }
+
+  /* Guess log (for drawer to see what guesser is guessing) */
+  .guess-log {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    padding: 0.8rem 1rem;
+    max-height: 100px;
+    overflow-y: auto;
+    display: flex; flex-direction: column; gap: 0.4rem;
+  }
+  .guess-log:empty::before {
+    content: "Opponent's guesses will appear here...";
+    color: rgba(255,255,255,0.2);
+    font-size: 0.85rem;
+  }
+  .guess-entry { font-size: 0.9rem; animation: slideIn 0.3s ease; }
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateX(-10px); }
+    to   { opacity: 1; transform: translateX(0); }
+  }
+  .guess-entry .who { color: rgba(255,255,255,0.4); font-size:0.8rem; }
+  .guess-entry .word { font-weight: 700; }
+  .guess-entry.correct .word { color: var(--green); }
+
+  /* Connection */
+  .conn-dot { width:8px; height:8px; border-radius:50%; background:var(--red); transition:background 0.3s; display:inline-block; }
+  .conn-dot.live { background:var(--green); box-shadow:0 0 6px var(--green); animation:pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1}50%{opacity:0.4} }
+
+  .toast {
+    position: fixed; bottom: 2rem; left: 50%; transform: translateX(-50%);
+    background: rgba(26,26,46,0.95);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 12px; padding: 1rem 2rem;
+    font-size: 1.1rem; font-family: 'Boogaloo', cursive;
+    text-align: center; z-index: 100;
+    opacity: 0; transition: opacity 0.3s; pointer-events: none;
+  }
+  .toast.show { opacity: 1; }
+  .toast.win  { border-color: var(--green); color: var(--green); }
+  .toast.lose { border-color: var(--red);   color: var(--red); }
+  .toast.info { border-color: var(--blue);  color: var(--blue); }
+</style>
+</head>
+<body>
+
+<!-- TOP BAR -->
+<div class="topbar">
+  <div class="logo">Scribble AI</div>
+  <div class="role-badge">✋ Drawer</div>
+  <div class="score-display"><span>⭐</span><span class="score-num" id="scoreNum">0</span></div>
+</div>
+
+<!-- WORD CARD -->
+<div class="word-card">
+  <div>
+    <div class="word-label">Your word to draw</div>
+    <div class="word-value hidden-word" id="wordDisplay">Waiting...</div>
+  </div>
+  <div style="text-align:right;font-size:0.8rem;color:rgba(255,255,255,0.3)">
+    Only you can see this
+  </div>
+</div>
+
+<!-- STATUS BAR -->
+<div class="status-bar">
+  <div class="conn-dot" id="connDot"></div>
+  <span id="connText" style="font-size:0.8rem;color:rgba(255,255,255,0.4)">Connecting...</span>
+  <div style="flex:1"></div>
+  <span class="timer-text" id="timerText">—</span>
+  <div class="timer-wrap" style="width:200px">
+    <div class="timer-bar" id="timerBar" style="width:100%"></div>
+  </div>
+</div>
+
+<!-- CANVAS PREVIEW (mirror of what you're drawing via Python script) -->
+<div class="canvas-wrap">
+  <canvas id="previewCanvas" width="640" height="480"></canvas>
+  <div class="canvas-overlay" id="overlay">
+    <div class="overlay-emoji">🚀</div>
+    <div id="overlayText">Waiting for players...</div>
+    <div class="overlay-sub" id="overlaySub">Share the server URL with your partner</div>
+  </div>
+</div>
+
+<!-- INFO PANEL -->
+<div class="info-panel">
+  <!-- Gesture guide -->
+  <div class="gesture-guide">
+    <div class="gesture-chip">
+      <span class="g-icon">☝️</span>
+      <div><div class="g-name">Draw</div><div class="g-label">Index finger only</div></div>
+    </div>
+    <div class="gesture-chip">
+      <span class="g-icon">✊</span>
+      <div><div class="g-name">Stop</div><div class="g-label">Closed fist</div></div>
+    </div>
+    <div class="gesture-chip">
+      <span class="g-icon">🖐</span>
+      <div><div class="g-name">Clear</div><div class="g-label">Open palm</div></div>
+    </div>
+  </div>
+
+  <!-- Launch command -->
+  <div class="launch-box">
+    <strong>Launch the drawing script on your laptop:</strong><br>
+    <code>python hand_gesture_draw.py --server http://&lt;server-ip&gt;:5000 --name YourName</code><br>
+    <span style="font-size:0.8rem">The webcam window will open. Use gestures to draw!</span>
+  </div>
+
+  <!-- Guess log -->
+  <div class="guess-log" id="guessLog"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ──────────────────────────────────────────────
+//  STATE
+// ──────────────────────────────────────────────
+const canvas  = document.getElementById('previewCanvas');
+const ctx     = canvas.getContext('2d');
+const overlay = document.getElementById('overlay');
+let myScore   = 0;
+let timerInt  = null;
+let timeLeft  = 60;
+let roundActive = false;
+let myName    = '';
+let currentWord = '';
+
+// ──────────────────────────────────────────────
+//  SOCKET
+// ──────────────────────────────────────────────
+const socket = io();
+
+socket.on('connect', () => {
+  setConn(true);
+  const name = prompt('Enter your name:', 'Drawer') || 'Drawer';
+  myName = name;
+  socket.emit('join_game', { name });
+});
+socket.on('disconnect', () => setConn(false));
+
+socket.on('joined', data => {
+  showOverlay('🙋', `Joined as ${data.name}`, `Waiting for ${2 - data.player_count} more player...`);
+});
+socket.on('player_joined', data => {
+  if (data.player_count >= 2) showOverlay('🎮', 'Both players ready!', 'Starting soon...');
+});
+socket.on('game_ready', data => {
+  showOverlay('🚀', data.message, '');
+});
+
+socket.on('round_start', data => {
+  clearCanvas();
+  resetTimer(data.duration);
+  roundActive = true;
+
+  if (data.role === 'drawer') {
+    currentWord = data.word;
+    const wd = document.getElementById('wordDisplay');
+    wd.textContent = data.word.toUpperCase();
+    wd.classList.remove('hidden-word');
+    hideOverlay();
+    addGuessLog('system', `Round ${data.round} — Draw: ${data.word.toUpperCase()}`, '');
+  } else {
+    // Switched to guesser role
+    currentWord = '';
+    document.getElementById('wordDisplay').textContent = '???';
+    document.getElementById('wordDisplay').classList.add('hidden-word');
+    showOverlay('💬', 'Your turn to GUESS!', 'Watch the canvas and type your guesses in the browser');
+  }
+});
+
+socket.on('round_end', data => {
+  roundActive = false;
+  stopTimer();
+  const w = data.winner || 'Nobody';
+  const scores = Object.entries(data.scores).map(([k,v]) => `${k}: ${v}`).join(' | ');
+  showOverlay('📊', `Word was: "${data.word}"`, `Winner: ${w} | ${scores}`);
+  document.getElementById('wordDisplay').textContent = 'Waiting...';
+  document.getElementById('wordDisplay').classList.add('hidden-word');
+  if (data.winner && data.winner !== myName) {
+    showToast(`Guesser got it! Word: "${data.word}"`, 'info');
+  } else if (!data.winner) {
+    showToast(`Time's up! Word was "${data.word}"`, 'lose');
+  }
+});
+
+// Mirror drawing from the Python script onto this preview canvas
+socket.on('draw_update', data => {
+  drawLine(
+    data.x1 * canvas.width, data.y1 * canvas.height,
+    data.x2 * canvas.width, data.y2 * canvas.height,
+    data.color || '#1e1edc', data.width || 5
+  );
+});
+socket.on('canvas_cleared', () => clearCanvas());
+
+socket.on('guess_broadcast', data => {
+  addGuessLog(data.name, data.guess, '');
+});
+
+socket.on('player_left', data => {
+  roundActive = false;
+  stopTimer();
+  showOverlay('😢', data.message, 'Refresh to restart');
+});
+
+// ──────────────────────────────────────────────
+//  CANVAS
+// ──────────────────────────────────────────────
+function clearCanvas() {
+  ctx.fillStyle = '#fdfaf3';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+function drawLine(x1, y1, x2, y2, color, width) {
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x2, y2);
+  ctx.strokeStyle = color;
+  ctx.lineWidth   = width;
+  ctx.lineCap     = 'round';
+  ctx.lineJoin    = 'round';
+  ctx.stroke();
+}
+clearCanvas();
+
+// ──────────────────────────────────────────────
+//  TIMER
+// ──────────────────────────────────────────────
+function resetTimer(duration) {
+  stopTimer();
+  timeLeft = duration;
+  updateTimerUI(duration, duration);
+  timerInt = setInterval(() => {
+    timeLeft--;
+    updateTimerUI(timeLeft, duration);
+    if (timeLeft <= 0) { stopTimer(); if (roundActive) socket.emit('time_up'); }
+  }, 1000);
+}
+function stopTimer() { if (timerInt) { clearInterval(timerInt); timerInt = null; } }
+function updateTimerUI(left, total) {
+  const pct = (left / total) * 100;
+  document.getElementById('timerText').textContent = `${left}s`;
+  const bar = document.getElementById('timerBar');
+  bar.style.width = pct + '%';
+  bar.className   = 'timer-bar' + (left <= 10 ? ' danger' : '');
+}
+
+// ──────────────────────────────────────────────
+//  UI HELPERS
+// ──────────────────────────────────────────────
+function showOverlay(emoji, text, sub) {
+  document.querySelector('.overlay-emoji').textContent = emoji;
+  document.getElementById('overlayText').textContent   = text;
+  document.getElementById('overlaySub').textContent    = sub;
+  overlay.classList.remove('hidden');
+}
+function hideOverlay() { overlay.classList.add('hidden'); }
+
+function setConn(live) {
+  document.getElementById('connDot').className    = 'conn-dot' + (live ? ' live' : '');
+  document.getElementById('connText').textContent = live ? 'Connected' : 'Disconnected';
+}
+
+function addGuessLog(name, word, type) {
+  const log   = document.getElementById('guessLog');
+  const entry = document.createElement('div');
+  entry.className = `guess-entry ${type}`;
+  entry.innerHTML = `<span class="who">${name}:</span> <span class="word">${word}</span>`;
+  log.appendChild(entry);
+  log.scrollTop = log.scrollHeight;
+}
+
+let toastTimer;
+function showToast(msg, type) {
+  const t = document.getElementById('toast');
+  t.textContent  = msg;
+  t.className    = `toast ${type} show`;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 3000);
+}
+</script>
+</body>
+</html>

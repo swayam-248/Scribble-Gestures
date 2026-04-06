@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.env/
+.venv/
+ml/gesture_model.pkl
+ml/scaler.pkl
+data/gesture_dataset.csv
+.DS_Store
