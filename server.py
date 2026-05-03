@@ -217,19 +217,20 @@ def handle_guess(data):
     }, to=game_state["room"])
 
     if guess == correct_word:
-        # Guesser scores a point
-        game_state["players"][sid]["score"] += 1
-        end_round(winner_sid=sid)
+        # Only the guesser can score and end the round
+        if game_state["players"].get(sid, {}).get("role") == "guesser":
+            game_state["players"][sid]["score"] += 1
+            end_round(winner_sid=sid)
 
-        # Schedule next round
-        def next_round():
-            socketio.sleep(4)
-            if len(game_state["players"]) == 2:
-                swap_roles()
-                socketio.emit('canvas_cleared', {}, to=game_state["room"])
-                start_round()
+            # Schedule next round
+            def next_round():
+                socketio.sleep(4)
+                if len(game_state["players"]) == 2:
+                    swap_roles()
+                    socketio.emit('canvas_cleared', {}, to=game_state["room"])
+                    start_round()
 
-        socketio.start_background_task(next_round)
+            socketio.start_background_task(next_round)
 
 @socketio.on('time_up')
 def handle_time_up():
@@ -261,9 +262,12 @@ def handle_disconnect():
             'message': f'{name} disconnected. Waiting for players...'
         }, to=game_state["room"])
 
+import os
+
 if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
     print("=" * 50)
-    print("  Scribble Game Server Starting...")
-    print("  Open http://localhost:5000 on both laptops")
+    print(f"  Scribble Game Server Starting on port {port}...")
+    print("  Open the URL provided by your hosting service")
     print("=" * 50)
-    socketio.run(app, host='0.0.0.0', port=5000, debug=True)
+    socketio.run(app, host='0.0.0.0', port=port, debug=False)

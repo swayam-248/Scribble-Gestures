@@ -215,6 +215,42 @@
   .toast.win  { border-color: var(--green); color: var(--green); }
   .toast.lose { border-color: var(--red);   color: var(--red); }
   .toast.info { border-color: var(--blue);  color: var(--blue); }
+  .guess-input-row {
+    display: none; /* Hidden by default, shown when role is guesser */
+    gap: 0.8rem;
+    margin-bottom: 0.8rem;
+  }
+  #guessInput {
+    flex: 1;
+    background: rgba(255,255,255,0.08);
+    border: 2px solid rgba(255,255,255,0.15);
+    border-radius: 12px;
+    padding: 0.9rem 1.2rem;
+    font-size: 1.1rem;
+    font-family: 'Nunito', sans-serif;
+    color: var(--chalk);
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  #guessInput::placeholder { color: rgba(255,255,255,0.3); }
+  #guessInput:focus { border-color: var(--green); }
+  #guessInput:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  #submitBtn {
+    background: var(--green);
+    color: white;
+    border: none;
+    border-radius: 12px;
+    padding: 0.9rem 1.8rem;
+    font-size: 1rem;
+    font-family: 'Nunito', sans-serif;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.2s, transform 0.1s;
+  }
+  #submitBtn:hover  { background: #059669; }
+  #submitBtn:active { transform: scale(0.97); }
+  #submitBtn:disabled { background: #374151; cursor: not-allowed; }
 </style>
 </head>
 <body>
@@ -283,11 +319,32 @@
     <span style="font-size:0.8rem">The webcam window will open. Use gestures to draw!</span>
   </div>
 
+  <!-- Guess input (visible when role swaps to guesser) -->
+  <div class="guess-input-row" id="guessInputRow">
+    <input id="guessInput" type="text" placeholder="Type your guess here..." autocomplete="off"/>
+    <button id="submitBtn">Guess →</button>
+  </div>
+
   <!-- Guess log -->
   <div class="guess-log" id="guessLog"></div>
 </div>
 
+<!-- MEDIAPIPE FOR IN-BROWSER DRAWING -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+
+<!-- HIDDEN CAMERA FOR MEDIAPIPE -->
+<video id="videoInput" style="display:none;" playsinline></video>
+
 <div class="toast" id="toast"></div>
+
+<!-- MODE SELECTOR -->
+<div id="modeSelector" style="position:fixed; top:1rem; right:1rem; z-index:100; display:flex; gap:0.5rem;">
+  <button id="startWebMode" style="background:var(--green); color:white; border:none; padding:0.5rem 1rem; border-radius:8px; font-family:'Nunito',sans-serif; font-weight:700; cursor:pointer; box-shadow:0 4px 12px rgba(16,185,129,0.3);">
+    Enable Web Drawing 📷
+  </button>
+</div>
 
 <script>
 // ──────────────────────────────────────────────
@@ -336,14 +393,33 @@ socket.on('round_start', data => {
     const wd = document.getElementById('wordDisplay');
     wd.textContent = data.word.toUpperCase();
     wd.classList.remove('hidden-word');
-    hideOverlay();
+    
+    // If webcam is already on, don't show the "Waiting" overlay
+    if (webModeActive) {
+      hideOverlay();
+    } else {
+      showOverlay('✋', 'Your turn to DRAW!', 'Click "Enable Web Drawing" below');
+    }
+    
     addGuessLog('system', `Round ${data.round} — Draw: ${data.word.toUpperCase()}`, '');
+    
+    // Hide guessing UI
+    document.getElementById('guessInputRow').style.display = 'none';
+    document.querySelector('.gesture-guide').style.display = 'flex';
+    document.getElementById('startWebMode').style.display = 'block';
   } else {
     // Switched to guesser role
     currentWord = '';
     document.getElementById('wordDisplay').textContent = '???';
     document.getElementById('wordDisplay').classList.add('hidden-word');
-    showOverlay('💬', 'Your turn to GUESS!', 'Watch the canvas and type your guesses in the browser');
+    showOverlay('💬', 'Your turn to GUESS!', 'Watch the canvas and type your guesses below');
+    
+    // Show guessing UI
+    document.getElementById('guessInputRow').style.display = 'flex';
+    document.getElementById('guessInput').focus();
+    document.querySelector('.gesture-guide').style.display = 'none';
+    document.querySelector('.launch-box').style.display = 'none';
+    document.getElementById('startWebMode').style.display = 'none';
   }
 });
 
@@ -355,6 +431,10 @@ socket.on('round_end', data => {
   showOverlay('📊', `Word was: "${data.word}"`, `Winner: ${w} | ${scores}`);
   document.getElementById('wordDisplay').textContent = 'Waiting...';
   document.getElementById('wordDisplay').classList.add('hidden-word');
+  
+  // Hide guessing UI
+  document.getElementById('guessInputRow').style.display = 'none';
+
   if (data.winner && data.winner !== myName) {
     showToast(`Guesser got it! Word: "${data.word}"`, 'info');
   } else if (!data.winner) {
@@ -448,6 +528,22 @@ function addGuessLog(name, word, type) {
   log.scrollTop = log.scrollHeight;
 }
 
+// ──────────────────────────────────────────────
+//  GUESSING LOGIC (for when roles swap)
+// ──────────────────────────────────────────────
+document.getElementById('submitBtn').addEventListener('click', submitGuess);
+document.getElementById('guessInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') submitGuess();
+});
+
+function submitGuess() {
+  const input = document.getElementById('guessInput');
+  const guess = input.value.trim();
+  if (!guess || !roundActive) return;
+  socket.emit('submit_guess', { guess });
+  input.value = '';
+}
+
 let toastTimer;
 function showToast(msg, type) {
   const t = document.getElementById('toast');
@@ -456,6 +552,116 @@ function showToast(msg, type) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.classList.remove('show'), 3000);
 }
+
+// ──────────────────────────────────────────────
+//  MEDIAPIPE HANDS LOGIC
+// ──────────────────────────────────────────────
+let webModeActive = false;
+let prevX = null, prevY = null;
+let lastSendTime = 0;
+const SEND_INTERVAL = 40; // ms
+
+const videoElement = document.getElementById('videoInput');
+const startBtn = document.getElementById('startWebMode');
+
+function setupMediaPipe() {
+  if (typeof Hands === 'undefined') {
+    console.warn('MediaPipe Hands not loaded yet, retrying...');
+    setTimeout(setupMediaPipe, 1000);
+    return;
+  }
+
+  const hands = new Hands({
+    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+  });
+
+  hands.setOptions({
+    maxNumHands: 1,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.7,
+    minTrackingConfidence: 0.7
+  });
+
+  hands.onResults(onResults);
+
+  const camera = new Camera(videoElement, {
+    onFrame: async () => {
+      await hands.send({image: videoElement});
+    },
+    width: 640,
+    height: 480
+  });
+
+  startBtn.addEventListener('click', () => {
+    if (!webModeActive) {
+      camera.start().then(() => {
+        webModeActive = true;
+        startBtn.textContent = 'Web Drawing Active ✅';
+        startBtn.style.background = '#059669';
+        showToast('Webcam drawing enabled!', 'info');
+        const lb = document.querySelector('.launch-box');
+        if (lb) lb.style.display = 'none';
+      }).catch(err => {
+        console.error('Camera failed:', err);
+        showToast('Camera access denied!', 'lose');
+      });
+    }
+  });
+}
+
+function onResults(results) {
+  if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+    prevX = null; prevY = null;
+    return;
+  }
+
+  const landmarks = results.multiHandLandmarks[0];
+  const gesture = classifyGesture(landmarks);
+
+  const tip = landmarks[8];
+  const fx = tip.x;
+  const fy = tip.y;
+
+  if (gesture === 'draw') {
+    if (prevX !== null && prevY !== null) {
+      drawLine(prevX * canvas.width, prevY * canvas.height, fx * canvas.width, fy * canvas.height, '#1e1edc', 5);
+
+      const now = Date.now();
+      if (now - lastSendTime > SEND_INTERVAL) {
+        socket.emit('draw_data', {
+          x1: prevX, y1: prevY,
+          x2: fx, y2: fy,
+          color: '#1e1edc', width: 5
+        });
+        lastSendTime = now;
+      }
+    }
+    prevX = fx; prevY = fy;
+  } else if (gesture === 'clear') {
+    clearCanvas();
+    socket.emit('clear_canvas');
+    prevX = null; prevY = null;
+  } else {
+    prevX = null; prevY = null;
+  }
+}
+
+function classifyGesture(lms) {
+  const fingersUp = [
+    lms[4].x < lms[3].x, 
+    lms[8].y < lms[6].y, 
+    lms[12].y < lms[10].y, 
+    lms[16].y < lms[14].y, 
+    lms[20].y < lms[18].y  
+  ];
+
+  const upCount = fingersUp.filter(u => u).length;
+  if (upCount >= 4) return 'clear';
+  if (fingersUp[1] && upCount === 1) return 'draw';
+  return 'stop';
+}
+
+setTimeout(setupMediaPipe, 1000);
 </script>
 </body>
 </html>

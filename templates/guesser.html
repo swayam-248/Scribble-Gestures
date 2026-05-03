@@ -275,8 +275,23 @@
   <div class="guess-log" id="guessLog"></div>
 </div>
 
+<!-- MEDIAPIPE FOR IN-BROWSER DRAWING -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+
+<!-- HIDDEN CAMERA FOR MEDIAPIPE -->
+<video id="videoInput" style="display:none;" playsinline></video>
+
 <!-- TOAST -->
 <div class="toast" id="toast"></div>
+
+<!-- MODE SELECTOR -->
+<div id="modeSelector" style="position:fixed; top:1rem; right:1rem; z-index:100; display:flex; gap:0.5rem;">
+  <button id="startWebMode" style="display:none; background:var(--blue); color:white; border:none; padding:0.5rem 1rem; border-radius:8px; font-family:'Nunito',sans-serif; font-weight:700; cursor:pointer; box-shadow:0 4px 12px rgba(37,99,235,0.3);">
+    Enable Web Drawing 📷
+  </button>
+</div>
 
 <script>
 // ──────────────────────────────────────────────
@@ -328,10 +343,19 @@ socket.on('round_start', data => {
     hideOverlay();
     enableGuessing(true);
     addGuessLog('system', `Round ${data.round} started! Start guessing...`, 'system');
+    document.getElementById('startWebMode').style.display = 'none';
   } else {
     // Switched to drawer role
     enableGuessing(false);
-    showOverlay('✋', 'Your turn to DRAW!', 'Use the Python script on your laptop');
+    
+    // If webcam is already on, don't show the "Waiting" overlay
+    if (webModeActive) {
+      hideOverlay();
+    } else {
+      showOverlay('✋', 'Your turn to DRAW!', 'Click "Enable Web Drawing" below');
+    }
+    
+    document.getElementById('startWebMode').style.display = 'block';
   }
 });
 
@@ -339,6 +363,7 @@ socket.on('round_end', data => {
   roundActive = false;
   stopTimer();
   enableGuessing(false);
+  document.getElementById('startWebMode').style.display = 'none';
   const w = data.winner || 'Nobody';
   const scores = Object.entries(data.scores).map(([k,v]) => `${k}: ${v}`).join(' | ');
   showOverlay('📊', `Word was: "${data.word}"`, `Winner: ${w} | ${scores}`);
@@ -375,6 +400,7 @@ socket.on('player_left', data => {
   roundActive = false;
   stopTimer();
   enableGuessing(false);
+  document.getElementById('startWebMode').style.display = 'none';
   showOverlay('😢', data.message, 'Refresh to restart');
 });
 
@@ -407,9 +433,6 @@ function addGuessLog(name, word, type) {
   entry.innerHTML = `<span class="who">${name}:</span><span class="word">${word}</span>`;
   log.appendChild(entry);
   log.scrollTop = log.scrollHeight;
-  if (type === 'correct') {
-    entry.innerHTML += ' ✅';
-  }
 }
 
 // ──────────────────────────────────────────────
@@ -486,6 +509,106 @@ function showToast(msg, type) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { t.classList.remove('show'); }, 3000);
 }
+
+// ──────────────────────────────────────────────
+//  MEDIAPIPE HANDS LOGIC (for when this player becomes the Drawer)
+// ──────────────────────────────────────────────
+let webModeActive = false;
+let prevX = null, prevY = null;
+let lastSendTime = 0;
+const SEND_INTERVAL = 40; 
+
+const videoElement = document.getElementById('videoInput');
+const startBtn = document.getElementById('startWebMode');
+
+function setupMediaPipe() {
+  if (typeof Hands === 'undefined') {
+    console.warn('MediaPipe Hands not loaded yet, retrying...');
+    setTimeout(setupMediaPipe, 1000);
+    return;
+  }
+
+  const hands = new Hands({
+    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+  });
+
+  hands.setOptions({
+    maxNumHands: 1,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.7,
+    minTrackingConfidence: 0.7
+  });
+
+  hands.onResults(onResults);
+
+  const camera = new Camera(videoElement, {
+    onFrame: async () => {
+      await hands.send({image: videoElement});
+    },
+    width: 640,
+    height: 480
+  });
+
+  startBtn.addEventListener('click', () => {
+    if (!webModeActive) {
+      camera.start().then(() => {
+        webModeActive = true;
+        startBtn.textContent = 'Web Drawing Active ✅';
+        startBtn.style.background = '#059669';
+        showToast('Webcam drawing enabled!', 'info');
+        hideOverlay();
+      }).catch(err => {
+        console.error('Camera failed:', err);
+        showToast('Camera access denied!', 'lose');
+      });
+    }
+  });
+}
+
+function onResults(results) {
+  if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+    prevX = null; prevY = null;
+    return;
+  }
+  // Only process if we are currently the drawer
+  if (overlay.classList.contains('hidden') === false && !webModeActive) return;
+
+  const landmarks = results.multiHandLandmarks[0];
+  const gesture = classifyGesture(landmarks);
+  const tip = landmarks[8];
+  const fx = tip.x;
+  const fy = tip.y;
+
+  if (gesture === 'draw') {
+    if (prevX !== null && prevY !== null) {
+      drawLine(prevX * canvas.width, prevY * canvas.height, fx * canvas.width, fy * canvas.height, '#1e1edc', 5);
+      const now = Date.now();
+      if (now - lastSendTime > SEND_INTERVAL) {
+        socket.emit('draw_data', { x1: prevX, y1: prevY, x2: fx, y2: fy, color: '#1e1edc', width: 5 });
+        lastSendTime = now;
+      }
+    }
+    prevX = fx; prevY = fy;
+  } else if (gesture === 'clear') {
+    clearCanvas();
+    socket.emit('clear_canvas');
+    prevX = null; prevY = null;
+  } else {
+    prevX = null; prevY = null;
+  }
+}
+
+function classifyGesture(lms) {
+  const fingersUp = [
+    lms[4].x < lms[3].x, lms[8].y < lms[6].y, lms[12].y < lms[10].y, lms[16].y < lms[14].y, lms[20].y < lms[18].y
+  ];
+  const upCount = fingersUp.filter(u => u).length;
+  if (upCount >= 4) return 'clear';
+  if (fingersUp[1] && upCount === 1) return 'draw';
+  return 'stop';
+}
+
+setTimeout(setupMediaPipe, 1000);
 </script>
 </body>
 </html>

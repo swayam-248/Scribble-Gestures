@@ -156,10 +156,4 @@ Camera → Hand Detection → Landmark Extraction
 
 ---
 
-## 📚 Viva Key Points
 
-1. **Why KNN?** — Simple, interpretable, no training time, works well for small datasets with meaningful feature spaces
-2. **Why 42 features?** — 21 landmarks × 2 coordinates; normalized for invariance
-3. **Why WebSockets?** — Full-duplex, low-latency; better than HTTP polling for real-time drawing
-4. **Why MediaPipe?** — Optimized, runs on CPU, pre-trained landmark detection
-5. **Why index finger (landmark 8)?** — Topmost point of the pointing gesture; most natural drawing pointer
