@@ -121,14 +121,48 @@
     position: absolute; inset: 0;
     display: flex; flex-direction: column;
     align-items: center; justify-content: center;
-    background: rgba(26,26,46,0.88);
-    backdrop-filter: blur(4px);
+    background: rgba(26,26,46,0.92);
+    /* Removed backdrop-filter blur that was blocking the view */
     font-family: 'Boogaloo', cursive;
     font-size: 2rem;
     text-align: center; padding: 1rem;
-    transition: opacity 0.4s;
+    transition: opacity 0.4s, visibility 0.4s;
+    z-index: 50;
   }
-  .canvas-overlay.hidden { opacity: 0; pointer-events: none; }
+  .canvas-overlay.hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+  
+  /* ── CAMERA PREVIEW ── */
+  .camera-preview-wrap {
+    position: fixed;
+    bottom: 1.5rem;
+    right: 1.5rem;
+    width: 200px;
+    height: 150px;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 2px solid var(--blue);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    z-index: 100;
+    background: #000;
+    display: none; /* Shown only when web mode is active */
+  }
+  #videoInputVisible {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transform: scaleX(-1); /* Mirror effect */
+  }
+  .camera-label {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    background: rgba(0,0,0,0.6);
+    color: white;
+    font-size: 0.65rem;
+    padding: 2px 8px;
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
   .overlay-emoji { font-size: 4rem; margin-bottom: 0.5rem; }
   .overlay-sub { font-size: 1rem; font-family:'Nunito',sans-serif; opacity:0.6; margin-top:0.5rem; }
 
@@ -337,6 +371,12 @@
 <!-- HIDDEN CAMERA FOR MEDIAPIPE -->
 <video id="videoInput" style="display:none;" playsinline></video>
 
+<!-- VISIBLE CAMERA PREVIEW -->
+<div class="camera-preview-wrap" id="cameraPreview">
+  <video id="videoInputVisible" autoplay muted playsinline></video>
+  <div class="camera-label">Webcam Live</div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <!-- MODE SELECTOR -->
@@ -359,6 +399,7 @@ let timeLeft  = 60;
 let roundActive = false;
 let myName    = '';
 let currentWord = '';
+let currentRole = '';  // Track current role for MediaPipe guard
 
 // ──────────────────────────────────────────────
 //  SOCKET
@@ -389,6 +430,7 @@ socket.on('round_start', data => {
   roundActive = true;
 
   if (data.role === 'drawer') {
+    currentRole = 'drawer';
     currentWord = data.word;
     const wd = document.getElementById('wordDisplay');
     wd.textContent = data.word.toUpperCase();
@@ -408,11 +450,15 @@ socket.on('round_start', data => {
     document.querySelector('.gesture-guide').style.display = 'flex';
     document.getElementById('startWebMode').style.display = 'block';
   } else {
+    currentRole = 'guesser';
     // Switched to guesser role
     currentWord = '';
     document.getElementById('wordDisplay').textContent = '???';
     document.getElementById('wordDisplay').classList.add('hidden-word');
-    showOverlay('💬', 'Your turn to GUESS!', 'Watch the canvas and type your guesses below');
+    
+    // CRITICAL FIX: Hide overlay for guesser so they can see the canvas!
+    hideOverlay();
+    showToast(`Your turn to GUESS!`, 'info');
     
     // Show guessing UI
     document.getElementById('guessInputRow').style.display = 'flex';
@@ -435,9 +481,14 @@ socket.on('round_end', data => {
   // Hide guessing UI
   document.getElementById('guessInputRow').style.display = 'none';
 
-  if (data.winner && data.winner !== myName) {
+  // Update score
+  if (data.winner && data.winner === myName) {
+    myScore++;
+    document.getElementById('scoreNum').textContent = myScore;
+    showToast(`🎉 Correct! You scored!`, 'win');
+  } else if (data.winner && data.winner !== myName) {
     showToast(`Guesser got it! Word: "${data.word}"`, 'info');
-  } else if (!data.winner) {
+  } else {
     showToast(`Time's up! Word was "${data.word}"`, 'lose');
   }
 });
@@ -599,8 +650,15 @@ function setupMediaPipe() {
         startBtn.textContent = 'Web Drawing Active ✅';
         startBtn.style.background = '#059669';
         showToast('Webcam drawing enabled!', 'info');
+        
+        // Show the visible preview and link it to the camera stream
+        const previewVideo = document.getElementById('videoInputVisible');
+        previewVideo.srcObject = videoElement.srcObject;
+        document.getElementById('cameraPreview').style.display = 'block';
+
         const lb = document.querySelector('.launch-box');
         if (lb) lb.style.display = 'none';
+        hideOverlay();
       }).catch(err => {
         console.error('Camera failed:', err);
         showToast('Camera access denied!', 'lose');
@@ -610,6 +668,9 @@ function setupMediaPipe() {
 }
 
 function onResults(results) {
+  // ROLE GUARD: Only process hand tracking when we are the drawer
+  if (currentRole !== 'drawer') return;
+
   if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
     prevX = null; prevY = null;
     return;

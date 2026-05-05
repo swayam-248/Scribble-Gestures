@@ -117,15 +117,49 @@
     position: absolute; inset: 0;
     display: flex; flex-direction: column;
     align-items: center; justify-content: center;
-    background: rgba(26,26,46,0.85);
-    backdrop-filter: blur(4px);
+    background: rgba(26,26,46,0.92);
+    /* Removed backdrop-filter: blur(4px); */
     font-family: 'Boogaloo', cursive;
     font-size: 2rem;
     text-align: center;
     padding: 1rem;
-    transition: opacity 0.4s;
+    transition: opacity 0.4s, visibility 0.4s;
+    z-index: 50;
   }
-  .canvas-overlay.hidden { opacity: 0; pointer-events: none; }
+  .canvas-overlay.hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+
+  /* ── CAMERA PREVIEW ── */
+  .camera-preview-wrap {
+    position: fixed;
+    bottom: 1.5rem;
+    right: 1.5rem;
+    width: 200px;
+    height: 150px;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 2px solid var(--blue);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    z-index: 100;
+    background: #000;
+    display: none; /* Shown only when web mode is active */
+  }
+  #videoInputVisible {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transform: scaleX(-1); /* Mirror effect */
+  }
+  .camera-label {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    background: rgba(0,0,0,0.6);
+    color: white;
+    font-size: 0.65rem;
+    padding: 2px 8px;
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
   .overlay-emoji { font-size: 4rem; margin-bottom: 0.5rem; }
   .overlay-sub { font-size: 1rem; font-family: 'Nunito', sans-serif; opacity: 0.6; margin-top: 0.5rem; }
 
@@ -283,6 +317,12 @@
 <!-- HIDDEN CAMERA FOR MEDIAPIPE -->
 <video id="videoInput" style="display:none;" playsinline></video>
 
+<!-- VISIBLE CAMERA PREVIEW -->
+<div class="camera-preview-wrap" id="cameraPreview">
+  <video id="videoInputVisible" autoplay muted playsinline></video>
+  <div class="camera-label">Webcam Live</div>
+</div>
+
 <!-- TOAST -->
 <div class="toast" id="toast"></div>
 
@@ -305,6 +345,7 @@ let timerInt  = null;
 let timeLeft  = 60;
 let roundActive = false;
 let myName    = '';
+let currentRole = '';  // Track current role for MediaPipe guard
 
 // ──────────────────────────────────────────────
 //  SOCKET
@@ -340,11 +381,15 @@ socket.on('round_start', data => {
   roundActive = true;
 
   if (data.role === 'guesser') {
+    currentRole = 'guesser';
+    // CRITICAL FIX: Hide overlay for guesser so they can see the canvas!
     hideOverlay();
     enableGuessing(true);
     addGuessLog('system', `Round ${data.round} started! Start guessing...`, 'system');
     document.getElementById('startWebMode').style.display = 'none';
+    showToast(`Your turn to GUESS!`, 'info');
   } else {
+    currentRole = 'drawer';
     // Switched to drawer role
     enableGuessing(false);
     
@@ -556,6 +601,12 @@ function setupMediaPipe() {
         startBtn.textContent = 'Web Drawing Active ✅';
         startBtn.style.background = '#059669';
         showToast('Webcam drawing enabled!', 'info');
+        
+        // Show the visible preview and link it to the camera stream
+        const previewVideo = document.getElementById('videoInputVisible');
+        previewVideo.srcObject = videoElement.srcObject;
+        document.getElementById('cameraPreview').style.display = 'block';
+
         hideOverlay();
       }).catch(err => {
         console.error('Camera failed:', err);
@@ -566,12 +617,13 @@ function setupMediaPipe() {
 }
 
 function onResults(results) {
+  // ROLE GUARD: Only process hand tracking when we are the drawer
+  if (currentRole !== 'drawer') return;
+
   if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
     prevX = null; prevY = null;
     return;
   }
-  // Only process if we are currently the drawer
-  if (overlay.classList.contains('hidden') === false && !webModeActive) return;
 
   const landmarks = results.multiHandLandmarks[0];
   const gesture = classifyGesture(landmarks);

@@ -5,11 +5,11 @@ Hand Gesture Scribble Game - Flask + Socket.IO Server
 import random
 import time
 from flask import Flask, render_template, jsonify
-from flask_socketio import SocketIO, emit, join_room, leave_room
+from flask_socketio import SocketIO, emit, join_room
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'scribble_secret_key_2024'
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
 # ─────────────────────────────────────────────
 # WORD BANK
@@ -126,11 +126,9 @@ def status():
 # ─────────────────────────────────────────────
 @socketio.on('connect')
 def handle_connect():
-    print(f"Client connected: {socketio.server.environ.get('REMOTE_ADDR', 'unknown')} [{socketio.server.manager.get_rooms('/', request_sid())}]")
-
-def request_sid():
     from flask import request
-    return request.sid
+    sid = request.sid
+    print(f"Client connected: {sid}")
 
 @socketio.on('join_game')
 def handle_join(data):
