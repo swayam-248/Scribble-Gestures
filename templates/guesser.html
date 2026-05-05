@@ -393,11 +393,13 @@ socket.on('round_start', data => {
     // Switched to drawer role
     enableGuessing(false);
     
-    // If webcam is already on, don't show the "Waiting" overlay
+    // If webcam is already on, hide overlay immediately and start drawing
     if (webModeActive) {
       hideOverlay();
     } else {
       showOverlay('✋', 'Your turn to DRAW!', 'Click "Enable Web Drawing" below');
+      // Auto-hide overlay after 3 seconds so canvas is visible
+      setTimeout(() => { hideOverlay(); }, 3000);
     }
     
     document.getElementById('startWebMode').style.display = 'block';
@@ -628,7 +630,8 @@ function onResults(results) {
   const landmarks = results.multiHandLandmarks[0];
   const gesture = classifyGesture(landmarks);
   const tip = landmarks[8];
-  const fx = tip.x;
+  // MIRROR FIX: Flip x-coordinate so drawing matches the mirrored camera preview
+  const fx = 1 - tip.x;
   const fy = tip.y;
 
   if (gesture === 'draw') {
